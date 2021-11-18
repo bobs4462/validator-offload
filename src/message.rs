@@ -1,20 +1,20 @@
 use actix::{Message, Recipient};
 
-use crate::{Pubkey, Slot, SubKey};
+use crate::{Pubkey, Slot, SubID, SubKey};
 
 #[derive(Message)]
 #[rtype(type = "()")]
 pub struct AccountUpdatedMessage {
     pub key: SubKey,
     pub info: AccountInfo,
+    pub sub: SubID,
 }
 
 #[derive(Message)]
 #[rtype(type = "()")]
 pub struct SlotUpdatedMessage {
-    slot: u64,
-    parent: u64,
-    root: u64,
+    pub slot: u64,
+    pub parent: u64,
 }
 
 pub struct AccountInfo {
@@ -38,10 +38,4 @@ pub enum SubscribeMessage {
 pub struct SubscriptionInfo {
     pub key: SubKey,
     pub recipient: Recipient<AccountUpdatedMessage>,
-}
-
-impl AccountUpdatedMessage {
-    fn to_json_string(&self) -> String {
-        "Hello".to_owned()
-    }
 }

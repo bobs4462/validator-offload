@@ -1,37 +1,37 @@
 use serde::Serialize;
 
 use crate::{
-    message::{AccountInfo, AccountUpdatedMessage},
-    Slot, SubID, SubscriptionKind,
+    message::{AccountInfo, AccountUpdatedMessage, SlotUpdatedMessage},
+    Slot, SubID, SubscriptionKind, JSONRPC,
 };
 
 #[derive(Serialize)]
-pub struct Notification {
+pub struct AccountNotification {
     jsonrpc: &'static str,
     method: &'static str,
-    params: NotificationParams,
+    params: AccountNotificationParams,
 }
 
 #[derive(Serialize)]
-struct NotificationParams {
-    result: NotificationResult,
+struct AccountNotificationParams {
+    result: AccountNotificationResult,
     subscription: SubID,
 }
 
 #[derive(Serialize)]
-struct NotificationResult {
-    context: NotificationContext,
-    value: NotificationValue,
+struct AccountNotificationResult {
+    context: AccountNotificationContext,
+    value: AccountNotificationValue,
 }
 
 #[derive(Serialize)]
-struct NotificationContext {
+struct AccountNotificationContext {
     slot: Slot,
 }
 
 #[derive(Serialize)]
 #[serde(untagged)]
-pub enum NotificationValue {
+pub enum AccountNotificationValue {
     Program(ProgramValue),
     Account(AccountValue),
 }
@@ -51,40 +51,40 @@ pub struct ProgramValue {
     account: AccountValue,
 }
 
-impl Notification {
-    const JSONRPC: &'static str = "2.0";
-    pub fn new(msg: AccountUpdatedMessage, subscription: SubID) -> Self {
+impl From<AccountUpdatedMessage> for AccountNotification {
+    fn from(msg: AccountUpdatedMessage) -> Self {
         let method = match msg.key.kind {
             SubscriptionKind::Program => "programNotification",
-            SubscriptionKind::Acccount => "accountNotification",
+            SubscriptionKind::Account => "accountNotification",
         };
-        let result = NotificationResult::from(msg);
-        let params = NotificationParams {
+        let subscription = msg.sub;
+        let result = AccountNotificationResult::from(msg);
+        let params = AccountNotificationParams {
             result,
             subscription,
         };
 
         Self {
-            jsonrpc: Self::JSONRPC,
+            jsonrpc: JSONRPC,
             method,
             params,
         }
     }
 }
 
-impl From<AccountUpdatedMessage> for NotificationResult {
+impl From<AccountUpdatedMessage> for AccountNotificationResult {
     fn from(msg: AccountUpdatedMessage) -> Self {
-        let context = NotificationContext {
+        let context = AccountNotificationContext {
             slot: msg.info.slot,
         };
 
-        let value = NotificationValue::from(msg);
+        let value = AccountNotificationValue::from(msg);
 
         Self { context, value }
     }
 }
 
-impl From<AccountUpdatedMessage> for NotificationValue {
+impl From<AccountUpdatedMessage> for AccountNotificationValue {
     fn from(msg: AccountUpdatedMessage) -> Self {
         let account = AccountValue::from(msg.info);
 
@@ -94,7 +94,7 @@ impl From<AccountUpdatedMessage> for NotificationValue {
                 let value = ProgramValue { pubkey, account };
                 Self::Program(value)
             }
-            SubscriptionKind::Acccount => Self::Account(account),
+            SubscriptionKind::Account => Self::Account(account),
         }
     }
 }
@@ -122,6 +122,45 @@ impl From<AccountInfo> for AccountValue {
             rent_epoch,
             lamports,
             executable,
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct SlotNotification {
+    jsonrpc: &'static str,
+    method: &'static str,
+    params: SlotNotificationParams,
+}
+
+#[derive(Serialize)]
+pub struct SlotNotificationParams {
+    result: SlotNotificationResult,
+    subscription: SubID,
+}
+
+#[derive(Serialize)]
+pub struct SlotNotificationResult {
+    slot: Slot,
+    parent: Slot,
+}
+
+impl From<SlotUpdatedMessage> for SlotNotification {
+    fn from(msg: SlotUpdatedMessage) -> Self {
+        let result = SlotNotificationResult {
+            slot: msg.slot,
+            parent: msg.parent,
+        };
+        let params = SlotNotificationParams {
+            result,
+            // 0, becasue it's not important, as only one slot subscription
+            // can exist per websocket session
+            subscription: 0,
+        };
+        Self {
+            jsonrpc: JSONRPC,
+            method: "slotNotification",
+            params,
         }
     }
 }
