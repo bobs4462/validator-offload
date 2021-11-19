@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 
 use serde::Serialize;
 
+// TODO rewrite using Cow
 #[derive(Debug, Serialize)]
 pub struct SubError {
     code: i64,

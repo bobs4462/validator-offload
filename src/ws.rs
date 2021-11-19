@@ -69,7 +69,7 @@ impl WsSession {
         msg: T,
         ctx: &mut WebsocketContext<Self>,
     ) -> Result<Success, Failure> {
-        let subscription: SubRequest = match serde_json::from_str(msg.as_ref()) {
+        let request: SubRequest = match serde_json::from_str(msg.as_ref()) {
             Ok(val) => val,
             Err(e) => {
                 println!("Invalid websocket message, cannot deserialize: {}", e);
@@ -77,9 +77,9 @@ impl WsSession {
             }
         };
         use Method::*;
-        match subscription.method {
+        match request.method {
             method @ (AccountSubscribe | ProgramSubscribe) => {
-                let params = subscription.params.sub();
+                let params = request.params.sub();
                 if params.is_none() {
                     println!(
                         "Subscription parameters are invalid for request: {:?}",
@@ -89,7 +89,7 @@ impl WsSession {
                         "Invalid params: expected [<pubkey | string>, <options: map>]".into(),
                         SubErrorKind::InvalidParams,
                     );
-                    return Err((err, Some(subscription.id)));
+                    return Err((err, Some(request.id)));
                 }
                 let PubkeyParams { pubkey, options } = params.unwrap();
                 let kind = match method {
@@ -102,17 +102,20 @@ impl WsSession {
                     kind,
                 };
                 if let Some(&id) = self.subscriptions.get(&key) {
-                    return Ok((SubResult::Id(id), subscription.id));
+                    return Ok((SubResult::Id(id), request.id));
                 };
                 let recipient = ctx.address().recipient();
 
-                let info = SubscriptionInfo { key, recipient };
+                let info = SubscriptionInfo {
+                    key: key.clone(),
+                    recipient,
+                };
                 self.manager
                     .do_send(SubscribeMessage::AccountSubscribe(info));
-                Ok((SubResult::Id(subscription.id), subscription.id))
+                Ok((SubResult::Id(self.next()), request.id))
             }
             method @ (AccountUnsubscribe | ProgramUnsubscribe) => {
-                let params = subscription.params.unsub();
+                let params = request.params.unsub();
                 if params.is_none() {
                     println!(
                         "Subscription parameters are invalid for request: {:?}",
@@ -122,23 +125,47 @@ impl WsSession {
                         "Invalid params: expected [<id | u64>]".into(),
                         SubErrorKind::InvalidParams,
                     );
-                    return Err((err, Some(subscription.id)));
+                    return Err((err, Some(request.id)));
                 }
                 let id = params.unwrap();
-                self.subscriptions.remove_rev(&id);
-                Ok((SubResult::Id(subscription.id), subscription.id))
+                let key = self.subscriptions.remove_rev(&id);
+                if let Some(key) = key {
+                    let recipient = ctx.address().recipient();
+
+                    let info = SubscriptionInfo { key, recipient };
+                    self.manager
+                        .do_send(SubscribeMessage::AccountUnsubscribe(info));
+                    Ok((SubResult::Status(true), request.id))
+                } else {
+                    let err = SubError::new(
+                        "Invalid subscription id".into(),
+                        SubErrorKind::InvalidParams,
+                    );
+                    return Err((err, Some(request.id)));
+                }
             }
             method @ (SlotSubscribe | SlotUnsubscribe) => {
                 let recipient = ctx.address().recipient();
-                let message = match method {
-                    SlotSubscribe => SubscribeMessage::SlotSubscribe(recipient),
+                let (message, result) = match method {
+                    SlotSubscribe => (
+                        SubscribeMessage::SlotSubscribe(recipient),
+                        SubResult::Id(self.next()),
+                    ),
                     // guaranteed to be SlotUnsubscribe
-                    _ => SubscribeMessage::SlotUnsubscribe(recipient),
+                    _ => (
+                        SubscribeMessage::SlotUnsubscribe(recipient),
+                        SubResult::Status(true),
+                    ),
                 };
                 self.manager.do_send(message);
-                Ok((SubResult::Id(subscription.id), subscription.id))
+                Ok((result, request.id))
             }
         }
+    }
+    fn next(&mut self) -> u64 {
+        let id = self.next;
+        self.next += 1;
+        id
     }
 }
 
