@@ -1,11 +1,13 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use crate::{
+    error::{SubError, SubErrorKind},
     manager::SubscriptionManager,
     message::{AccountUpdatedMessage, SlotUpdatedMessage, SubscribeMessage, SubscriptionInfo},
     notification::{AccountNotification, SlotNotification},
-    subscription::SubRequest,
-    SubID, SubKey,
+    subscription::{Method, PubkeyParams, SubRequest, SubResponse, SubResponseError, SubResult},
+    types::SubscriptionsMap,
+    SubID, SubKey, SubscriptionKind,
 };
 use actix::{clock::Instant, Actor, ActorContext, Addr, AsyncContext, Handler, StreamHandler};
 use actix_web_actors::ws::{self, WebsocketContext};
@@ -23,7 +25,8 @@ struct WsSession {
     manager: Arc<Addr<SubscriptionManager>>,
     /// list of subscriptions which are tracked by this
     /// session
-    subscriptions: HashMap<SubKey, SubID>,
+    subscriptions: SubscriptionsMap,
+
     /// next subscription id to issued to client, on next
     /// subscription
     next: SubID,
@@ -31,12 +34,14 @@ struct WsSession {
     id: u64,
 }
 
+type Success = (SubResult, u64);
+type Failure = (SubError, Option<u64>);
 impl WsSession {
     fn new(manager: Arc<Addr<SubscriptionManager>>, id: u64) -> Self {
         Self {
             hb: Instant::now(),
             manager,
-            subscriptions: HashMap::default(),
+            subscriptions: SubscriptionsMap::default(),
             next: 0,
             id,
         }
@@ -59,15 +64,81 @@ impl WsSession {
         ctx.run_interval(HEARTBEAT_INTERVAL, callback);
     }
 
-    fn process<T: AsRef<str>>(&mut self, msg: T) {
+    fn process<T: AsRef<str>>(
+        &mut self,
+        msg: T,
+        ctx: &mut WebsocketContext<Self>,
+    ) -> Result<Success, Failure> {
         let subscription: SubRequest = match serde_json::from_str(msg.as_ref()) {
             Ok(val) => val,
             Err(e) => {
-                //log the error and silently ignore invalid message
                 println!("Invalid websocket message, cannot deserialize: {}", e);
-                return;
+                return Err((e.into(), None));
             }
         };
+        use Method::*;
+        match subscription.method {
+            method @ (AccountSubscribe | ProgramSubscribe) => {
+                let params = subscription.params.sub();
+                if params.is_none() {
+                    println!(
+                        "Subscription parameters are invalid for request: {:?}",
+                        method
+                    );
+                    let err = SubError::new(
+                        "Invalid params: expected [<pubkey | string>, <options: map>]".into(),
+                        SubErrorKind::InvalidParams,
+                    );
+                    return Err((err, Some(subscription.id)));
+                }
+                let PubkeyParams { pubkey, options } = params.unwrap();
+                let kind = match method {
+                    AccountSubscribe => SubscriptionKind::Account,
+                    _ => SubscriptionKind::Program, // guaranteed to be ProgramSubscribe
+                };
+                let key = SubKey {
+                    key: pubkey,
+                    commitment: options.commitment,
+                    kind,
+                };
+                if let Some(&id) = self.subscriptions.get(&key) {
+                    return Ok((SubResult::Id(id), subscription.id));
+                };
+                let recipient = ctx.address().recipient();
+
+                let info = SubscriptionInfo { key, recipient };
+                self.manager
+                    .do_send(SubscribeMessage::AccountSubscribe(info));
+                Ok((SubResult::Id(subscription.id), subscription.id))
+            }
+            method @ (AccountUnsubscribe | ProgramUnsubscribe) => {
+                let params = subscription.params.unsub();
+                if params.is_none() {
+                    println!(
+                        "Subscription parameters are invalid for request: {:?}",
+                        method
+                    );
+                    let err = SubError::new(
+                        "Invalid params: expected [<id | u64>]".into(),
+                        SubErrorKind::InvalidParams,
+                    );
+                    return Err((err, Some(subscription.id)));
+                }
+                let id = params.unwrap();
+                self.subscriptions.remove_rev(&id);
+                Ok((SubResult::Id(subscription.id), subscription.id))
+            }
+            method @ (SlotSubscribe | SlotUnsubscribe) => {
+                let recipient = ctx.address().recipient();
+                let message = match method {
+                    SlotSubscribe => SubscribeMessage::SlotSubscribe(recipient),
+                    // guaranteed to be SlotUnsubscribe
+                    _ => SubscribeMessage::SlotUnsubscribe(recipient),
+                };
+                self.manager.do_send(message);
+                Ok((SubResult::Id(subscription.id), subscription.id))
+            }
+        }
     }
 }
 
@@ -127,6 +198,7 @@ impl StreamHandler<WsMessage> for WsSession {
                 return;
             }
         };
+        self.hb = Instant::now();
         match msg {
             ws::Message::Ping(msg) => {
                 self.hb = Instant::now();
@@ -136,9 +208,20 @@ impl StreamHandler<WsMessage> for WsSession {
             ws::Message::Binary(bin) => {
                 println!("Unexpected binary websocket message of len: {}", bin.len())
             }
-            ws::Message::Text(text) => self.process(text),
-            // TODO, not sure if even should handle those, as subscribe messages never come
-            // even close to default 64KB size of websocket frames, used by awc
+            ws::Message::Text(text) => match self.process(text, ctx) {
+                Ok((result, id)) => {
+                    let response = SubResponse::new(id, result);
+                    let response = serde_json::to_string(&response).unwrap();
+                    ctx.text(response);
+                }
+                Err((error, id)) => {
+                    let error = SubResponseError::new(id, error);
+                    let error = serde_json::to_string(&error).unwrap();
+                    ctx.text(error);
+                }
+            },
+            // TODO, not sure if we even should handle those, as subscribe messages never
+            // come even close to default 64KB size of websocket frames, used by awc
             ws::Message::Continuation(_) => {}
             ws::Message::Close(reason) => {
                 println!("Terminating websocket connection, reason: {:?}", reason);

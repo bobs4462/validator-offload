@@ -1,13 +1,20 @@
+use std::hash::Hash;
+
 use serde::Deserialize;
 
+pub mod error;
 pub mod listener;
 pub mod manager;
 pub mod message;
 pub mod notification;
 pub mod subscription;
+pub mod types;
 pub mod ws;
 
-#[derive(PartialEq, Eq, Hash)]
+const JSONRPC: &str = "2.0";
+const KEY_LEN: usize = 32;
+
+#[derive(PartialEq, Eq, Hash, Clone)]
 enum SubscriptionKind {
     Account,
     Program,
@@ -16,10 +23,22 @@ enum SubscriptionKind {
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(test, derive(Debug))]
-enum Commitment {
+pub enum Commitment {
     Processed,
     Confirmed,
     Finalized,
+}
+
+type SubID = u64;
+type Slot = u64;
+
+type Pubkey = [u8; KEY_LEN];
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+pub struct SubKey {
+    key: Pubkey,
+    commitment: Commitment,
+    kind: SubscriptionKind,
 }
 
 impl Default for Commitment {
@@ -27,19 +46,3 @@ impl Default for Commitment {
         Commitment::Finalized
     }
 }
-
-const KEY_LEN: usize = 32;
-
-type SubID = u64;
-type Slot = u64;
-
-type Pubkey = [u8; KEY_LEN];
-
-#[derive(PartialEq, Eq, Hash)]
-pub struct SubKey {
-    key: Pubkey,
-    commitment: Commitment,
-    kind: SubscriptionKind,
-}
-
-const JSONRPC: &str = "2.0";
