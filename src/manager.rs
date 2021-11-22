@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     message::{AccountUpdatedMessage, SlotUpdatedMessage, SubscribeMessage},
-    SubKey,
+    SubKey, SubscriptionKind,
 };
 
 #[derive(Default)]
@@ -14,10 +14,6 @@ pub struct SubscriptionManager {
 
 impl Actor for SubscriptionManager {
     type Context = Context<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.address().recipient();
-    }
 }
 
 impl Handler<SubscribeMessage> for SubscriptionManager {
@@ -46,6 +42,26 @@ impl Handler<SubscribeMessage> for SubscriptionManager {
             }
             SubscribeMessage::SlotUnsubscribe(recipient) => {
                 self.slot_subscriptions.remove(&recipient);
+            }
+        }
+    }
+}
+
+impl Handler<AccountUpdatedMessage> for SubscriptionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: AccountUpdatedMessage, _: &mut Self::Context) -> Self::Result {
+        let mut key = msg.key.clone();
+        if let Some(recipients) = self.account_subscriptions.get(&key) {
+            for r in recipients {
+                let _ = r.do_send(msg.clone());
+            }
+        }
+
+        key.kind = SubscriptionKind::Program;
+        if let Some(recipients) = self.account_subscriptions.get(&key) {
+            for r in recipients {
+                let _ = r.do_send(msg.clone());
             }
         }
     }

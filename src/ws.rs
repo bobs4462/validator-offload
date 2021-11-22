@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use crate::{
     error::{SubError, SubErrorKind},
@@ -18,11 +18,11 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(15);
 /// Websocket session manager, which is responsible for
 /// keeping connection alive and for servicing all
 /// subscriptions, which are sent via this connection
-struct WsSession {
+pub struct WsSession {
     /// last heartbeat instant
     hb: Instant,
     /// address of subscription manager
-    manager: Arc<Addr<SubscriptionManager>>,
+    manager: Addr<SubscriptionManager>,
     /// list of subscriptions which are tracked by this
     /// session
     subscriptions: SubscriptionsMap,
@@ -37,7 +37,7 @@ struct WsSession {
 type Success = (SubResult, u64);
 type Failure = (SubError, Option<u64>);
 impl WsSession {
-    fn new(manager: Arc<Addr<SubscriptionManager>>, id: u64) -> Self {
+    pub fn new(manager: Addr<SubscriptionManager>, id: u64) -> Self {
         Self {
             hb: Instant::now(),
             manager,
@@ -48,7 +48,7 @@ impl WsSession {
     }
 
     /// Helper method, to perform regular heartbeat health
-    /// checks, will abort connection if client fails to
+    /// checks. Will abort connection if client fails to
     /// respond during allowed time window
     fn hb(&self, ctx: &mut WebsocketContext<Self>) {
         let callback = |actor: &mut Self, ctx: &mut WebsocketContext<Self>| {
@@ -101,7 +101,7 @@ impl WsSession {
                     commitment: options.commitment,
                     kind,
                 };
-                if let Some(&id) = self.subscriptions.get(&key) {
+                if let Some(&id) = self.subscriptions.get_by_key(&key) {
                     return Ok((SubResult::Id(id), request.id));
                 };
                 let recipient = ctx.address().recipient();
@@ -112,7 +112,9 @@ impl WsSession {
                 };
                 self.manager
                     .do_send(SubscribeMessage::AccountSubscribe(info));
-                Ok((SubResult::Id(self.next()), request.id))
+                let id = self.next();
+                self.subscriptions.insert(key, id);
+                Ok((SubResult::Id(id), request.id))
             }
             method @ (AccountUnsubscribe | ProgramUnsubscribe) => {
                 let params = request.params.unsub();
@@ -128,7 +130,7 @@ impl WsSession {
                     return Err((err, Some(request.id)));
                 }
                 let id = params.unwrap();
-                let key = self.subscriptions.remove_rev(&id);
+                let key = self.subscriptions.remove_by_id(&id);
                 if let Some(key) = key {
                     let recipient = ctx.address().recipient();
 

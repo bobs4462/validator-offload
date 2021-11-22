@@ -1,42 +1,56 @@
-use actix::Addr;
-use clickhouse::{Client, Row};
-use serde::Deserialize;
-use std::sync::Arc;
+use actix::{Actor, Addr, AsyncContext, Context, StreamHandler};
 
-use crate::{manager::SubscriptionManager, Commitment, Pubkey};
+use crate::manager::SubscriptionManager;
+use futures::stream;
 
-pub struct DatabaseListener {
-    query: String,
-    client: Client,
-    managers: Arc<Vec<Addr<SubscriptionManager>>>,
+pub struct PubSubListner {
+    manager: Addr<SubscriptionManager>,
 }
 
-impl DatabaseListener {
-    pub fn new(
-        query: String,
-        client: Client,
-        managers: Arc<Vec<Addr<SubscriptionManager>>>,
-    ) -> Self {
-        Self {
-            query,
-            client,
-            managers,
-        }
-    }
+impl Actor for PubSubListner {
+    type Context = Context<Self>;
 
-    pub async fn listen(self) {
-        let mut cursor = self
-            .client
-            .watch(&self.query)
-            .fetch::<InsertNotification>()
-            .unwrap();
+    fn started(&mut self, ctx: &mut Self::Context) {
+        let pubsub_stream = stream::unfold(0, pubsub_accounts_listen);
 
-        while let Ok(Some((_version, data))) = cursor.next().await {}
+        ctx.add_stream(pubsub_stream);
     }
 }
 
-#[derive(Deserialize, Row)]
-pub struct InsertNotification {
-    pubkey: Pubkey,
-    slot_status: Commitment,
+impl PubSubListner {
+    pub fn new(manager: Addr<SubscriptionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+use crate::message::{AccountUpdatedMessage, PubSubAccount};
+use tokio_nsq::*;
+
+pub async fn pubsub_accounts_listen(mut count: u64) -> Option<(AccountUpdatedMessage, u64)> {
+    let topic = NSQTopic::new("accounts").unwrap();
+    let channel = NSQChannel::new("only").unwrap();
+
+    let mut addresses = std::collections::HashSet::new();
+    addresses.insert("http://127.0.0.1:4161".to_string());
+
+    let mut consumer = NSQConsumerConfig::new(topic, channel)
+        .set_max_in_flight(15)
+        .set_sources(NSQConsumerConfigSources::Lookup(
+            NSQConsumerLookupConfig::new().set_addresses(addresses),
+        ))
+        .build();
+
+    let message = consumer.consume_filtered().await.unwrap();
+
+    let account: PubSubAccount = serde_json::from_slice(&message.body).unwrap();
+    message.finish();
+    let account = AccountUpdatedMessage::from(account);
+    count += 1;
+    Some((account, count))
+}
+
+impl StreamHandler<AccountUpdatedMessage> for PubSubListner {
+    fn handle(&mut self, item: AccountUpdatedMessage, _: &mut Self::Context) {
+        self.manager.do_send(item);
+    }
 }

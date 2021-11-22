@@ -1,4 +1,4 @@
-use std::collections::{hash_map::Drain, HashMap};
+use std::collections::HashMap;
 
 use crate::{SubID, SubKey};
 
@@ -14,7 +14,7 @@ impl SubscriptionsMap {
         self.id2key.insert(id, key);
     }
 
-    pub fn remove(&mut self, key: &SubKey) -> Option<SubID> {
+    pub fn remove_by_key(&mut self, key: &SubKey) -> Option<SubID> {
         let id = self.key2id.remove(key);
         if let Some(id) = id {
             self.id2key.remove(&id);
@@ -22,7 +22,7 @@ impl SubscriptionsMap {
         id
     }
 
-    pub fn remove_rev(&mut self, id: &SubID) -> Option<SubKey> {
+    pub fn remove_by_id(&mut self, id: &SubID) -> Option<SubKey> {
         let key = self.id2key.remove(&id);
         if let Some(ref key) = key {
             self.key2id.remove(key);
@@ -30,19 +30,16 @@ impl SubscriptionsMap {
         key
     }
 
-    pub fn drain<'a>(&'a mut self) -> Drain<'a, SubKey, SubID> {
-        self.key2id.drain()
+    pub fn drain(&mut self) -> HashMap<SubKey, SubID> {
+        self.id2key = HashMap::new();
+        std::mem::replace(&mut self.key2id, HashMap::new())
     }
 
-    pub fn drain_rev<'a>(&'a mut self) -> Drain<'a, SubID, SubKey> {
-        self.id2key.drain()
-    }
-
-    pub fn get(&self, key: &SubKey) -> Option<&SubID> {
+    pub fn get_by_key(&self, key: &SubKey) -> Option<&SubID> {
         self.key2id.get(key)
     }
 
-    pub fn get_rev(&self, id: &SubID) -> Option<&SubKey> {
+    pub fn get_by_id(&self, id: &SubID) -> Option<&SubKey> {
         self.id2key.get(id)
     }
 }

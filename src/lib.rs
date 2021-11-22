@@ -24,9 +24,9 @@ enum SubscriptionKind {
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(test, derive(Debug))]
 pub enum Commitment {
-    Processed,
-    Confirmed,
-    Finalized,
+    Processed = 1,
+    Confirmed = 2,
+    Finalized = 3,
 }
 
 type SubID = u64;
