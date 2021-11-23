@@ -11,11 +11,11 @@ pub struct AccountUpdatedMessage {
     pub sub: SubID,
 }
 
-#[derive(Message)]
+#[derive(Message, Clone, Deserialize)]
 #[rtype(type = "()")]
 pub struct SlotUpdatedMessage {
-    pub slot: u64,
-    pub parent: u64,
+    pub slot: Slot,
+    pub parent: Slot,
 }
 
 #[derive(Clone)]
