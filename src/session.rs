@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::{
     error::{SubError, SubErrorKind},
-    manager::SubscriptionManager,
+    manager::SubscriptionsRouter,
     message::{AccountUpdatedMessage, SlotUpdatedMessage, SubscribeMessage, SubscriptionInfo},
     notification::{AccountNotification, SlotNotification},
     subscription::{Method, PubkeyParams, SubRequest, SubResponse, SubResponseError, SubResult},
@@ -22,7 +22,7 @@ pub struct WsSession {
     /// last heartbeat instant
     hb: Instant,
     /// address of subscription manager
-    manager: Addr<SubscriptionManager>,
+    router: Addr<SubscriptionsRouter>,
     /// list of subscriptions which are tracked by this
     /// session
     subscriptions: SubscriptionsMap,
@@ -37,10 +37,10 @@ pub struct WsSession {
 type Success = (SubResult, u64);
 type Failure = (SubError, Option<u64>);
 impl WsSession {
-    pub fn new(manager: Addr<SubscriptionManager>, id: u64) -> Self {
+    pub fn new(router: Addr<SubscriptionsRouter>, id: u64) -> Self {
         Self {
             hb: Instant::now(),
-            manager,
+            router,
             subscriptions: SubscriptionsMap::default(),
             next: 0,
             id,
@@ -110,7 +110,7 @@ impl WsSession {
                     key: key.clone(),
                     recipient,
                 };
-                self.manager
+                self.router
                     .do_send(SubscribeMessage::AccountSubscribe(info));
                 let id = self.next();
                 self.subscriptions.insert(key, id);
@@ -135,7 +135,7 @@ impl WsSession {
                     let recipient = ctx.address().recipient();
 
                     let info = SubscriptionInfo { key, recipient };
-                    self.manager
+                    self.router
                         .do_send(SubscribeMessage::AccountUnsubscribe(info));
                     Ok((SubResult::Status(true), request.id))
                 } else {
@@ -159,7 +159,7 @@ impl WsSession {
                         SubResult::Status(true),
                     ),
                 };
-                self.manager.do_send(message);
+                self.router.do_send(message);
                 Ok((result, request.id))
             }
         }
@@ -185,11 +185,11 @@ impl Actor for WsSession {
             let recipient = ctx.address().recipient();
             let info = SubscriptionInfo { key, recipient };
             let msg = SubscribeMessage::AccountUnsubscribe(info);
-            self.manager.do_send(msg);
+            self.router.do_send(msg);
         }
         let recipient = ctx.address().recipient();
         let msg = SubscribeMessage::SlotUnsubscribe(recipient);
-        self.manager.do_send(msg);
+        self.router.do_send(msg);
 
         actix::Running::Stop
     }

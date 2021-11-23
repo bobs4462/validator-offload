@@ -1,49 +1,24 @@
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-
-use actix::{Actor, Addr};
-use actix_web::web::{Data, HttpRequest, HttpResponse, Payload};
-use actix_web::{get, App, Error as HttpError, HttpServer};
-use actix_web_actors::ws;
-use std::sync::atomic::Ordering;
+use structopt::StructOpt;
+use ws_server::cli::CliOptions;
 use ws_server::listener::PubSubListner;
-use ws_server::{manager::SubscriptionManager, ws::WsSession};
+use ws_server::manager::SubscriptionsRouter;
+use ws_server::server::{Server, ServerState};
 
 #[actix::main]
 async fn main() -> std::io::Result<()> {
-    let manager = SubscriptionManager::default().start();
-    let state = State {
-        manager: manager.clone(),
-        next: Arc::new(AtomicU64::new(0)),
-    };
+    let opts = CliOptions::from_args();
+    let cores = num_cpus::get();
+    let workers = opts.worker_count.unwrap_or(cores / 2);
+    let managers = opts.manager_count.unwrap_or(cores / 2 - 2);
 
-    PubSubListner::new(manager).start();
+    let router = SubscriptionsRouter::new(managers);
 
-    HttpServer::new(move || {
-        App::new()
-            .service(start_connection) //. rename with "as" import or naming conflict
-            .app_data(Data::new(state.clone())) //register the lobby
-    })
-    .bind("127.0.0.1:8080")?
-    .run()
-    .await
-}
+    let state = ServerState::new(router.clone());
+    let server = Server::new(state, opts.bind_addr, workers);
 
-#[get("/")]
-pub async fn start_connection(
-    req: HttpRequest,
-    stream: Payload,
-    state: Data<State>,
-) -> Result<HttpResponse, HttpError> {
-    let session = WsSession::new(state.manager.clone(), state.next.load(Ordering::Relaxed));
-    state.next.fetch_add(1, Ordering::Relaxed);
+    PubSubListner::new(router, opts.nsqlookup.into_iter().collect());
 
-    let resp = ws::start(session, &req, stream)?;
-    Ok(resp)
-}
+    server.run().await?;
 
-#[derive(Clone)]
-pub struct State {
-    manager: Addr<SubscriptionManager>,
-    next: Arc<AtomicU64>,
+    Ok(())
 }

@@ -2,14 +2,16 @@ use std::hash::Hash;
 
 use serde::Deserialize;
 
+pub mod cli;
 pub mod error;
 pub mod listener;
 pub mod manager;
 pub mod message;
 pub mod notification;
+pub mod server;
+pub mod session;
 pub mod subscription;
 pub mod types;
-pub mod ws;
 
 const JSONRPC: &str = "2.0";
 const KEY_LEN: usize = 32;

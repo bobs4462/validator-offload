@@ -4,7 +4,7 @@ use serde::Deserialize;
 use crate::{Commitment, Pubkey, Slot, SubID, SubKey, SubscriptionKind};
 
 #[derive(Message, Clone)]
-#[rtype(type = "()")]
+#[rtype(result = "()")]
 pub struct AccountUpdatedMessage {
     pub key: SubKey,
     pub info: AccountInfo,
@@ -12,7 +12,7 @@ pub struct AccountUpdatedMessage {
 }
 
 #[derive(Message, Clone, Deserialize)]
-#[rtype(type = "()")]
+#[rtype(result = "()")]
 pub struct SlotUpdatedMessage {
     pub slot: Slot,
     pub parent: Slot,
@@ -29,7 +29,7 @@ pub struct AccountInfo {
 }
 
 #[derive(Message)]
-#[rtype(type = "()")]
+#[rtype(result = "()")]
 pub enum SubscribeMessage {
     AccountSubscribe(SubscriptionInfo),
     SlotSubscribe(Recipient<SlotUpdatedMessage>),

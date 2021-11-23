@@ -19,12 +19,8 @@ pub struct SubscriptionsRouter {
     managers: Vec<Addr<SubscriptionManager>>,
 }
 
-impl Actor for SubscriptionsRouter {
-    type Context = Context<Self>;
-}
-
 impl SubscriptionsRouter {
-    pub fn new(pool_size: usize) -> Self {
+    pub fn new(pool_size: usize) -> Addr<Self> {
         let mut managers = Vec::with_capacity(pool_size);
         for id in 0..pool_size {
             let mut sm = SubscriptionManager::default();
@@ -33,15 +29,17 @@ impl SubscriptionsRouter {
             let addr = Supervisor::start_in_arbiter(&arbiter, |_| sm);
             managers.push(addr);
         }
-        Self { managers }
+        let router = Self { managers };
+        let arbiter = Arbiter::new().handle();
+        Supervisor::start_in_arbiter(&arbiter, |_| router)
     }
 
     /// Get the address of subscription manager, which should handle related message
     #[inline]
-    fn addr<T: Hash>(&self, item: T) -> &Addr<SubscriptionManager> {
+    pub fn addr<T: Hash>(&self, item: T) -> &Addr<SubscriptionManager> {
         let mut hasher = DefaultHasher::new();
         item.hash(&mut hasher);
-        let idx = hasher.finish() as usize / self.managers.len();
+        let idx = hasher.finish() as usize % self.managers.len();
         &self.managers[idx]
     }
 }
@@ -50,9 +48,19 @@ impl Actor for SubscriptionManager {
     type Context = Context<Self>;
 }
 
+impl Actor for SubscriptionsRouter {
+    type Context = Context<Self>;
+}
+
 impl Supervised for SubscriptionManager {
     fn restarting(&mut self, _ctx: &mut Self::Context) {
         println!("restarting subscription manager #{}", self.id);
+    }
+}
+
+impl Supervised for SubscriptionsRouter {
+    fn restarting(&mut self, _ctx: &mut Self::Context) {
+        println!("restarting subscription router");
     }
 }
 
@@ -154,5 +162,102 @@ impl Handler<SlotUpdatedMessage> for SubscriptionsRouter {
         for addr in &self.managers {
             addr.do_send(msg.clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use actix::Message;
+    #[derive(Message)]
+    #[rtype(result = "usize")]
+    enum CountRequestMessage {
+        AccountSubscriptionsCount(SubKey),
+        SlotSubscriptionsCount,
+    }
+
+    #[derive(Message)]
+    #[rtype(result = "Addr<SubscriptionManager>")]
+    struct GetAddr<T: Hash>(T);
+
+    impl Handler<CountRequestMessage> for SubscriptionManager {
+        type Result = usize;
+
+        fn handle(&mut self, msg: CountRequestMessage, _ctx: &mut Self::Context) -> Self::Result {
+            match msg {
+                CountRequestMessage::SlotSubscriptionsCount => self.slot_subscriptions.len(),
+                CountRequestMessage::AccountSubscriptionsCount(key) => {
+                    let subs = self.account_subscriptions.get(&key);
+                    subs.unwrap_or(&HashSet::new()).len()
+                }
+            }
+        }
+    }
+
+    impl<T: Hash> Handler<GetAddr<T>> for SubscriptionsRouter {
+        type Result = Addr<SubscriptionManager>;
+
+        fn handle(&mut self, msg: GetAddr<T>, _ctx: &mut Self::Context) -> Self::Result {
+            self.addr(msg.0).clone()
+        }
+    }
+
+    use super::*;
+    use crate::{message::SubscriptionInfo, Commitment, SubscriptionKind};
+    #[actix::test]
+    async fn test_routing() {
+        let router = SubscriptionsRouter::new(4);
+        let subkey = SubKey {
+            key: [1; 32],
+            commitment: Commitment::Processed,
+            kind: SubscriptionKind::Account,
+        };
+        let manager = SubscriptionManager::default().start();
+
+        router.do_send(SubscribeMessage::AccountSubscribe(SubscriptionInfo {
+            key: subkey.clone(),
+            recipient: manager.clone().recipient(),
+        }));
+        let addr = router.send(GetAddr(subkey.clone())).await.unwrap();
+        let mut acc_sub_count = addr
+            .send(CountRequestMessage::AccountSubscriptionsCount(
+                subkey.clone(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(acc_sub_count, 1);
+        router
+            .send(SubscribeMessage::AccountUnsubscribe(SubscriptionInfo {
+                key: subkey.clone(),
+                recipient: manager.clone().recipient(),
+            }))
+            .await
+            .unwrap();
+        acc_sub_count = addr
+            .send(CountRequestMessage::AccountSubscriptionsCount(
+                subkey.clone(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(acc_sub_count, 0);
+
+        router.do_send(SubscribeMessage::SlotSubscribe(manager.clone().recipient()));
+        let addr = router
+            .send(GetAddr(manager.clone().recipient::<SlotUpdatedMessage>()))
+            .await
+            .unwrap();
+        let mut slot_sub_count = addr
+            .send(CountRequestMessage::SlotSubscriptionsCount)
+            .await
+            .unwrap();
+        assert_eq!(slot_sub_count, 1);
+        router
+            .send(SubscribeMessage::SlotUnsubscribe(manager.recipient()))
+            .await
+            .unwrap();
+        slot_sub_count = addr
+            .send(CountRequestMessage::SlotSubscriptionsCount)
+            .await
+            .unwrap();
+        assert_eq!(slot_sub_count, 0);
     }
 }
