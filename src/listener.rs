@@ -1,11 +1,13 @@
 use std::collections::HashSet;
 
 use actix::{Actor, Addr, Arbiter, AsyncContext, Context, StreamHandler, Supervised, Supervisor};
-
-use crate::message::{AccountUpdatedMessage, PubSubAccount};
-use crate::{manager::SubscriptionsRouter, message::SlotUpdatedMessage};
 use futures::stream;
+use rmp_serde as rmps;
 use tokio_nsq::*;
+
+use crate::message::PubSubAccount;
+use crate::{manager::SubscriptionsRouter, message::SlotUpdatedMessage};
+use crate::{Slot, METRICS};
 
 /// Actor, which is responsible for listening to the nsq messages,
 /// and forward them to subscription managers, after deserialization
@@ -13,6 +15,7 @@ pub struct PubSubListner {
     /// Router, that distributes messages between `SubscriptionManager`s
     router: Addr<SubscriptionsRouter>,
     nsqlookupd: HashSet<String>,
+    max_slot: Slot,
 }
 
 impl Actor for PubSubListner {
@@ -35,7 +38,11 @@ impl Actor for PubSubListner {
 
 impl PubSubListner {
     pub fn new(router: Addr<SubscriptionsRouter>, nsqlookupd: HashSet<String>) -> Addr<Self> {
-        let listener = Self { router, nsqlookupd };
+        let listener = Self {
+            router,
+            nsqlookupd,
+            max_slot: 0,
+        };
         let arbiter = Arbiter::new().handle();
         Supervisor::start_in_arbiter(&arbiter, |_| listener)
     }
@@ -47,14 +54,20 @@ impl Supervised for PubSubListner {
     }
 }
 
-impl StreamHandler<AccountUpdatedMessage> for PubSubListner {
-    fn handle(&mut self, item: AccountUpdatedMessage, _: &mut Self::Context) {
+impl StreamHandler<PubSubAccount> for PubSubListner {
+    fn handle(&mut self, item: PubSubAccount, _: &mut Self::Context) {
+        METRICS.account_updates_count.inc();
         self.router.do_send(item);
     }
 }
 
 impl StreamHandler<SlotUpdatedMessage> for PubSubListner {
     fn handle(&mut self, item: SlotUpdatedMessage, _: &mut Self::Context) {
+        println!("Got slot");
+        METRICS.account_updates_count.inc();
+
+        self.max_slot = self.max_slot.max(item.slot);
+        METRICS.slot.set(self.max_slot as i64);
         self.router.do_send(item);
     }
 }
@@ -63,20 +76,20 @@ impl StreamHandler<SlotUpdatedMessage> for PubSubListner {
 /// to produce new account updates
 pub async fn pubsub_accounts_listen(
     mut state: PubSubState,
-) -> Option<(AccountUpdatedMessage, PubSubState)> {
+) -> Option<(PubSubAccount, PubSubState)> {
     loop {
         let message = state.consume().await?;
-        let account: PubSubAccount = match serde_json::from_slice(&message.body) {
+        let account: PubSubAccount = match rmps::from_read(message.body.as_slice()) {
             Ok(v) => v,
             Err(e) => {
                 println!("failed to deserialize account data from pubsub: {}", e);
-                // notify nsq to remove message anyway, so we don't get it again
+                // notify nsq to remove message anyway, so we nsq doesn't requeue it
                 message.finish();
                 continue;
             }
         };
+        message.finish();
 
-        let account = AccountUpdatedMessage::from(account);
         break Some((account, state));
     }
 }
@@ -88,7 +101,7 @@ pub async fn pubsub_slots_listen(
 ) -> Option<(SlotUpdatedMessage, PubSubState)> {
     loop {
         let message = state.consume().await?;
-        let slot: SlotUpdatedMessage = match serde_json::from_slice(&message.body) {
+        let slot: SlotUpdatedMessage = match rmps::from_read(message.body.as_slice()) {
             Ok(v) => v,
             Err(e) => {
                 println!("failed to deserialize slot data from pubsub: {}", e);
@@ -97,6 +110,7 @@ pub async fn pubsub_slots_listen(
                 continue;
             }
         };
+        message.finish();
         break Some((slot, state));
     }
 }

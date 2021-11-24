@@ -1,7 +1,8 @@
 use actix::{Message, Recipient};
+use bytes::Bytes;
 use serde::Deserialize;
 
-use crate::{Commitment, Pubkey, Slot, SubID, SubKey, SubscriptionKind};
+use crate::{Pubkey, Slot, SubID, SubKey, SubscriptionKind};
 
 #[derive(Message, Clone)]
 #[rtype(result = "()")]
@@ -22,7 +23,7 @@ pub struct SlotUpdatedMessage {
 pub struct AccountInfo {
     pub lamports: u64,    // number of lamports assigned to this account
     pub owner: Pubkey,    // Pubkey of the program this account has been assigned to
-    pub data: Vec<u8>,    // data associated with the account
+    pub data: Bytes,      // data associated with the account
     pub executable: bool, // boolean indicating if the account contains a program
     pub rent_epoch: u64,  // the epoch at which this account will next owe rent
     pub slot: Slot,
@@ -42,40 +43,51 @@ pub struct SubscriptionInfo {
     pub recipient: Recipient<AccountUpdatedMessage>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Message, Clone)]
+#[rtype(result = "()")]
 pub struct PubSubAccount {
     pub pubkey: Pubkey,
-    owner: Pubkey,
+    pub owner: Pubkey,
     lamports: u64,
-    data: Vec<u8>,
+    data: Bytes,
     rent_epoch: u64,
     executable: bool,
     pub slot: Slot,
-    slot_status: u8,
+    pub slot_status: u8,
 }
 
-impl From<PubSubAccount> for AccountUpdatedMessage {
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct PubSubAccountWithSubKind {
+    pub account: PubSubAccount,
+    pub kind: SubscriptionKind,
+}
+
+impl PubSubAccountWithSubKind {
+    pub fn new(account: PubSubAccount, kind: SubscriptionKind) -> Self {
+        Self { account, kind }
+    }
+}
+
+impl From<PubSubAccountWithSubKind> for AccountUpdatedMessage {
+    fn from(acc: PubSubAccountWithSubKind) -> Self {
+        let key = SubKey::from(&acc);
+        let info = AccountInfo::from(acc.account);
+        let sub = SubID::default();
+
+        Self { key, info, sub }
+    }
+}
+
+impl From<PubSubAccount> for AccountInfo {
     fn from(acc: PubSubAccount) -> Self {
-        let commitment = match acc.slot_status {
-            1 => Commitment::Processed,
-            2 => Commitment::Confirmed,
-            _ => Commitment::Finalized,
-        };
-        let key = SubKey {
-            key: acc.pubkey,
-            commitment,
-            kind: SubscriptionKind::Account,
-        };
-        let info = AccountInfo {
+        AccountInfo {
             lamports: acc.lamports,
             owner: acc.owner,
             data: acc.data,
             executable: acc.executable,
             rent_epoch: acc.rent_epoch,
             slot: acc.slot,
-        };
-        let sub = 0;
-
-        Self { key, info, sub }
+        }
     }
 }

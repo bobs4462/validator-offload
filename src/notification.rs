@@ -111,7 +111,7 @@ impl From<AccountInfo> for AccountValue {
         } = info;
 
         let data = base64::encode(
-            zstd::encode_all(data.as_slice(), 0).expect("Account data cannot be compressed"),
+            zstd::encode_all(&data[..], 0).expect("Account data cannot be compressed"),
         );
         let data = [data, "base64+zstd".into()];
         let owner = bs58::encode(owner).into_string();
@@ -153,7 +153,7 @@ impl From<SlotUpdatedMessage> for SlotNotification {
         };
         let params = SlotNotificationParams {
             result,
-            // 0, becasue it's not important, as only one slot subscription
+            // 0, because it's not important, as only one slot subscription
             // can exist per websocket session
             subscription: 0,
         };
