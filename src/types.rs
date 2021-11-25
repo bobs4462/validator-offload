@@ -33,7 +33,7 @@ impl SubscriptionsMap {
 
     /// Remove entry by SubID, also removes entry from SubKey to SubID mapping
     pub fn remove_by_id(&mut self, id: &SubID) -> Option<SubKey> {
-        let key = self.id2key.remove(&id);
+        let key = self.id2key.remove(id);
         if let Some(ref key) = key {
             self.key2id.remove(key);
         }
@@ -43,7 +43,7 @@ impl SubscriptionsMap {
     /// Clear map, return existing SubKey to SubID (usually for cleanup iteration)
     pub fn drain(&mut self) -> HashMap<SubKey, SubID> {
         self.id2key = HashMap::new();
-        std::mem::replace(&mut self.key2id, HashMap::new())
+        std::mem::take(&mut self.key2id)
     }
 
     /// Retrieve SubID that corresponds to specified SubKey, if such exists

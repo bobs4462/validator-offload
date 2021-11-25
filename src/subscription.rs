@@ -5,57 +5,91 @@ use serde::{
 };
 use serde_json::Value as JsonValue;
 
+/// Represent all kinds of supported requests that the client
+/// may send over websocket connection
 #[derive(Deserialize)]
 pub struct SubRequest {
+    /// Identifier of request, used when sending response back
     pub id: u64,
+    /// Request method that should be performed on server,
+    /// e.g. subscribe or unsubscribe for variouse updates
     pub method: Method,
+    /// Parameters of request, that are required by method
     #[serde(default)]
     pub params: Params,
 }
 
+/// List of supported methods
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum Method {
+    /// Subscribe for account
     AccountSubscribe,
+    /// Subscribe for accounts of given program
     ProgramSubscribe,
+    /// Unsubscribe from account
     AccountUnsubscribe,
+    /// Unsubscribe from accounts of a given program
     ProgramUnsubscribe,
+    /// Subscribe for slot updates
     SlotSubscribe,
+    /// Unsubscribe from slot updates
     SlotUnsubscribe,
 }
 
+/// Various formats of request parameters, that different methods require
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub enum Params {
+    /// Parameter for all subscriptions methods.
+    /// _Note:_ slot subscriptions do not require any parameters
     SubscribeParams(PubkeyParams),
+    /// Parameter for all unsubscription methods.
+    /// Only client issued id is required
     UnsubscribeParams(SubID),
+    /// Parameters weren't supplied
     Absent,
 }
 
+/// Request parameters for account or program subscription
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub struct PubkeyParams {
+    /// Public key of entity, for which client wants to receive updates
     pub pubkey: Pubkey,
+    /// Extra subscription options
     pub options: SubOptions,
 }
 
+/// Options for configuring subscription
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub struct SubOptions {
-    encoding: Encoding,
+    /// Encoding to encode account data in, before
+    /// sending notification to client
+    pub encoding: Encoding,
+    /// Commitment level, which must be reached by account's
+    /// slot, before sending notification to client
     #[serde(default)]
     pub commitment: Commitment,
 }
 
+/// Various encoding options, that the client might
+/// want to receive the notification in
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
-enum Encoding {
+pub enum Encoding {
+    /// base58 encoding
     Base58,
+    /// base64 encoding
     Base64,
+    /// base64 encoding, with additional zstd compression
     #[serde(rename = "base64+zstd")]
     Base64Zstd,
 }
 
+/// Response that must be sent to client over websocket
+/// connection, after receiving any request
 #[derive(Serialize)]
 pub struct SubResponse {
     jsonrpc: &'static str,
@@ -63,6 +97,8 @@ pub struct SubResponse {
     result: SubResult,
 }
 
+/// Error response that is sent to client, in case if
+/// the request couldn't be handled by server
 #[derive(Serialize)]
 pub struct SubResponseError<'a> {
     jsonrpc: &'static str,
@@ -70,20 +106,27 @@ pub struct SubResponseError<'a> {
     error: SubError<'a>,
 }
 
+/// Result of processing client request
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum SubResult {
+    /// Id of subscription, which was created on server
     Id(SubID),
+    /// Indicates success status of unsubscription request
     Status(bool),
 }
 
 impl Params {
+    /// try to get subscription parameters for account or program,
+    /// if the current request was a to create a new subscription
     pub fn sub(self) -> Option<PubkeyParams> {
         if let Self::SubscribeParams(params) = self {
             return Some(params);
         }
         None
     }
+    /// Try to get id of subscription to remove,if the current
+    /// request was a to remove existing subscription
     pub fn unsub(self) -> Option<SubID> {
         if let Self::UnsubscribeParams(id) = self {
             return Some(id);
@@ -94,11 +137,12 @@ impl Params {
 
 impl Default for Params {
     fn default() -> Self {
-        return Self::Absent;
+        Self::Absent
     }
 }
 
 impl SubResponse {
+    /// Construct a new response
     pub fn new(id: u64, result: SubResult) -> Self {
         Self {
             jsonrpc: JSONRPC,
@@ -109,6 +153,7 @@ impl SubResponse {
 }
 
 impl<'a> SubResponseError<'a> {
+    /// Construct a new response indicating error
     pub fn new(id: Option<u64>, error: SubError<'a>) -> Self {
         Self {
             jsonrpc: JSONRPC,
@@ -129,7 +174,7 @@ impl<'de> Deserialize<'de> for Params {
         impl<'de> Visitor<'de> for ParamsVisitor {
             type Value = Params;
 
-            fn expecting(&self, f: &mut Formatter) -> fmt::Result {
+            fn expecting(&self, f: &mut Formatter<'_>) -> fmt::Result {
                 f.write_str("Array of [<pubkey | string>, <options | object>]")
             }
 
@@ -141,7 +186,7 @@ impl<'de> Deserialize<'de> for Params {
                     .next_element()
                     .ok()
                     .flatten()
-                    .ok_or(de::Error::missing_field("<pubkey | string>"))?;
+                    .ok_or_else(|| de::Error::missing_field("<pubkey | string>"))?;
                 if first.is_u64() {
                     let sub = first.as_u64().unwrap();
                     return Ok(Params::UnsubscribeParams(sub));
@@ -149,7 +194,7 @@ impl<'de> Deserialize<'de> for Params {
 
                 let pubkey = first
                     .as_str()
-                    .ok_or(de::Error::missing_field("<pubkey | string>"))?;
+                    .ok_or_else(|| de::Error::missing_field("<pubkey | string>"))?;
 
                 let mut buf = [0; 32];
 
@@ -162,7 +207,7 @@ impl<'de> Deserialize<'de> for Params {
                     .next_element()
                     .ok()
                     .flatten()
-                    .ok_or(de::Error::missing_field("<options | object >"))?;
+                    .ok_or_else(|| de::Error::missing_field("<options | object >"))?;
                 let options = SubOptions::deserialize(options)
                     .map_err(|_| de::Error::custom("incorrect format of parameter options"))?;
                 let params = PubkeyParams { pubkey, options };
@@ -170,89 +215,5 @@ impl<'de> Deserialize<'de> for Params {
             }
         }
         deserializer.deserialize_seq(ParamsVisitor)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn parse_account_subscribe() {
-        let request = r#"
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "accountSubscribe",
-            "params": [
-                "CM78CPUeXjn8o3yroDHxUtKsZZgoy4GPkPPXfouKNH12",
-                {
-                    "encoding": "base64",
-                    "commitment": "processed"
-                }
-            ]
-        }
-        "#;
-        let parsed: SubRequest = serde_json::from_str(request).unwrap();
-        assert_eq!(parsed.method, Method::AccountSubscribe);
-        let mut pubkey = [0; 32];
-        bs58::decode("CM78CPUeXjn8o3yroDHxUtKsZZgoy4GPkPPXfouKNH12")
-            .into(&mut pubkey)
-            .unwrap();
-        assert_eq!(
-            parsed.params,
-            Params::SubscribeParams(PubkeyParams {
-                pubkey,
-                options: SubOptions {
-                    encoding: Encoding::Base64,
-                    commitment: Commitment::Processed
-                }
-            })
-        );
-    }
-    #[test]
-    fn parse_programs_subscribe_without_commitment() {
-        let request = r#"
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "programSubscribe",
-            "params": [
-                "CM78CPUeXjn8o3yroDHxUtKsZZgoy4GPkPPXfouKNH12",
-                {
-                    "encoding": "base64+zstd"
-                }
-            ]
-        }
-        "#;
-        let parsed: SubRequest = serde_json::from_str(request).unwrap();
-        assert_eq!(parsed.method, Method::ProgramSubscribe);
-        let mut pubkey = [0; 32];
-        bs58::decode("CM78CPUeXjn8o3yroDHxUtKsZZgoy4GPkPPXfouKNH12")
-            .into(&mut pubkey)
-            .unwrap();
-        assert_eq!(
-            parsed.params,
-            Params::SubscribeParams(PubkeyParams {
-                pubkey,
-                options: SubOptions {
-                    encoding: Encoding::Base64Zstd,
-                    commitment: Commitment::Finalized
-                }
-            })
-        );
-    }
-    #[test]
-    fn parse_slot_subscribe() {
-        let request = r#"{"jsonrpc":"2.0", "id":1, "method":"slotSubscribe"}"#;
-        let parsed: SubRequest = serde_json::from_str(request).unwrap();
-        assert!(parsed.params.sub().is_none());
-        assert_eq!(parsed.method, Method::SlotSubscribe);
-    }
-    #[test]
-    fn parse_unsubscribe() {
-        let request = r#"{"jsonrpc":"2.0", "id":1, "method":"accountUnsubscribe", "params":[0]}"#;
-        let parsed: SubRequest = serde_json::from_str(request).unwrap();
-        assert_eq!(parsed.method, Method::AccountUnsubscribe);
-        assert_eq!(parsed.params, Params::UnsubscribeParams(0));
     }
 }

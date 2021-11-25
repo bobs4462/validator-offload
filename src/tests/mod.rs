@@ -1,1 +1,1 @@
-mod subscriptions_router;
+mod subscriptions;

@@ -4,6 +4,7 @@ use std::hash::Hash;
 use crate::{
     manager::{SubscriptionManager, SubscriptionsRouter},
     message::{AccountUpdatedMessage, SlotUpdatedMessage, SubscribeMessage, SubscriptionInfo},
+    subscription::*,
     Commitment, SubKey, SubscriptionKind,
 };
 use actix::{Actor, Addr, Context, Handler, Message};
@@ -111,4 +112,83 @@ async fn test_routing() {
         .await
         .unwrap();
     assert_eq!(slot_sub_count, 0);
+}
+#[test]
+fn parse_account_subscribe() {
+    let request = r#"
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "accountSubscribe",
+            "params": [
+                "CM78CPUeXjn8o3yroDHxUtKsZZgoy4GPkPPXfouKNH12",
+                {
+                    "encoding": "base64",
+                    "commitment": "processed"
+                }
+            ]
+        }
+        "#;
+    let parsed: SubRequest = serde_json::from_str(request).unwrap();
+    assert_eq!(parsed.method, Method::AccountSubscribe);
+    let mut pubkey = [0; 32];
+    bs58::decode("CM78CPUeXjn8o3yroDHxUtKsZZgoy4GPkPPXfouKNH12")
+        .into(&mut pubkey)
+        .unwrap();
+    assert_eq!(
+        parsed.params,
+        Params::SubscribeParams(PubkeyParams {
+            pubkey,
+            options: SubOptions {
+                encoding: Encoding::Base64,
+                commitment: Commitment::Processed
+            }
+        })
+    );
+}
+#[test]
+fn parse_programs_subscribe_without_commitment() {
+    let request = r#"
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "programSubscribe",
+            "params": [
+                "CM78CPUeXjn8o3yroDHxUtKsZZgoy4GPkPPXfouKNH12",
+                {
+                    "encoding": "base64+zstd"
+                }
+            ]
+        }
+        "#;
+    let parsed: SubRequest = serde_json::from_str(request).unwrap();
+    assert_eq!(parsed.method, Method::ProgramSubscribe);
+    let mut pubkey = [0; 32];
+    bs58::decode("CM78CPUeXjn8o3yroDHxUtKsZZgoy4GPkPPXfouKNH12")
+        .into(&mut pubkey)
+        .unwrap();
+    assert_eq!(
+        parsed.params,
+        Params::SubscribeParams(PubkeyParams {
+            pubkey,
+            options: SubOptions {
+                encoding: Encoding::Base64Zstd,
+                commitment: Commitment::Finalized
+            }
+        })
+    );
+}
+#[test]
+fn parse_slot_subscribe() {
+    let request = r#"{"jsonrpc":"2.0", "id":1, "method":"slotSubscribe"}"#;
+    let parsed: SubRequest = serde_json::from_str(request).unwrap();
+    assert!(parsed.params.sub().is_none());
+    assert_eq!(parsed.method, Method::SlotSubscribe);
+}
+#[test]
+fn parse_unsubscribe() {
+    let request = r#"{"jsonrpc":"2.0", "id":1, "method":"accountUnsubscribe", "params":[0]}"#;
+    let parsed: SubRequest = serde_json::from_str(request).unwrap();
+    assert_eq!(parsed.method, Method::AccountUnsubscribe);
+    assert_eq!(parsed.params, Params::UnsubscribeParams(0));
 }

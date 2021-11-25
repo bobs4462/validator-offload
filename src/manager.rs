@@ -12,7 +12,6 @@ use crate::{
 /// Main struct to track which websocket sessions are interested
 /// in which kinds of updates. Keeps to separate mappings to track
 /// account related and slot related subscriptions respectively
-#[derive(Default)]
 pub struct SubscriptionManager {
     account_subscriptions: HashMap<SubKey, HashSet<Recipient<AccountUpdatedMessage>>>,
     slot_subscriptions: HashSet<Recipient<SlotUpdatedMessage>>,
@@ -27,6 +26,18 @@ pub struct SubscriptionManager {
 pub struct SubscriptionsRouter {
     // subscription managers available in the pool
     managers: Vec<Addr<SubscriptionManager>>,
+}
+
+impl SubscriptionManager {
+    fn new(id: usize) -> Self {
+        let account_subscriptions = HashMap::default();
+        let slot_subscriptions = HashSet::default();
+        Self {
+            id,
+            account_subscriptions,
+            slot_subscriptions,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -51,8 +62,7 @@ impl SubscriptionsRouter {
     pub fn new(pool_size: usize) -> Addr<Self> {
         let mut managers = Vec::with_capacity(pool_size);
         for id in 0..pool_size {
-            let mut sm = SubscriptionManager::default();
-            sm.id = id;
+            let sm = SubscriptionManager::new(id);
             let arbiter = Arbiter::new().handle();
             let addr = Supervisor::start_in_arbiter(&arbiter, |_| sm);
             managers.push(addr);
@@ -183,14 +193,14 @@ impl Handler<PubSubAccount> for SubscriptionsRouter {
 
     fn handle(&mut self, acc: PubSubAccount, _ctx: &mut Self::Context) -> Self::Result {
         // Get address of manager by account key
-        let mut key = SubKey::new(acc.pubkey.clone()).commitment(acc.slot_status);
+        let mut key = SubKey::new(acc.pubkey).commitment(acc.slot_status);
         let mut addr = self.addr(&key);
         let mut update = PubSubAccountWithSubKind::new(acc.clone(), SubscriptionKind::Account);
 
         addr.do_send(update);
 
         // Get address of manager by account owner key, to check for program subscriptions
-        key = SubKey::new(acc.owner.clone())
+        key = SubKey::new(acc.owner)
             .commitment(acc.slot_status)
             .kind(SubscriptionKind::Program);
         addr = self.addr(&key);

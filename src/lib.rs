@@ -64,7 +64,10 @@ pub enum Commitment {
     Finalized = 3,
 }
 
+/// Id of subscription, issued to client, to different
+/// between various active subscriptions
 type SubID = u64;
+/// Slot number
 type Slot = u64;
 
 type Pubkey = [u8; KEY_LEN];
@@ -121,8 +124,8 @@ impl SubKey {
 impl From<&PubSubAccountWithSubKind> for SubKey {
     fn from(acc: &PubSubAccountWithSubKind) -> Self {
         let pubkey = match acc.kind {
-            SubscriptionKind::Account => acc.account.pubkey.clone(),
-            SubscriptionKind::Program => acc.account.owner.clone(),
+            SubscriptionKind::Account => acc.account.pubkey,
+            SubscriptionKind::Program => acc.account.owner,
         };
         SubKey::new(pubkey)
             .commitment(acc.account.slot_status)

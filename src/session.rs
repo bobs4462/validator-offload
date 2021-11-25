@@ -71,7 +71,7 @@ impl WsSession {
         &mut self,
         msg: T,
         ctx: &mut WebsocketContext<Self>,
-    ) -> Result<Success, Failure> {
+    ) -> Result<Success, Failure<'_>> {
         let request: SubRequest = match serde_json::from_str(msg.as_ref()) {
             Ok(val) => val,
             Err(e) => {
@@ -146,7 +146,7 @@ impl WsSession {
                         "Invalid subscription id".into(),
                         SubErrorKind::InvalidParams,
                     );
-                    return Err((err, Some(request.id)));
+                    Err((err, Some(request.id)))
                 }
             }
             method @ (SlotSubscribe | SlotUnsubscribe) => {

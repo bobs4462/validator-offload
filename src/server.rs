@@ -23,6 +23,7 @@ pub async fn connect(
     Ok(resp)
 }
 
+/// Helper type to contain state and configuration of server before running
 pub struct Server {
     state: ServerState,
     addr: String,
@@ -30,6 +31,7 @@ pub struct Server {
 }
 
 impl Server {
+    /// Start server process with configured parameters
     pub async fn run(self) -> std::io::Result<()> {
         HttpServer::new(move || {
             App::new()
@@ -44,6 +46,8 @@ impl Server {
     }
 }
 
+/// Server state, that is accessable to all worker threads.
+/// Separate copy of state is provided for each worker.
 #[derive(Clone)]
 pub struct ServerState {
     router: Addr<SubscriptionsRouter>,
@@ -51,6 +55,7 @@ pub struct ServerState {
 }
 
 impl ServerState {
+    /// Construct new server state
     pub fn new(router: Addr<SubscriptionsRouter>) -> Self {
         Self {
             router,
@@ -60,6 +65,7 @@ impl ServerState {
 }
 
 impl Server {
+    /// Construct new server instance with given configuration
     pub fn new(state: ServerState, addr: String, workers: usize) -> Self {
         Self {
             state,
