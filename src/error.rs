@@ -1,38 +1,45 @@
-use std::fmt::{self, Display};
+use std::{
+    borrow::Cow,
+    fmt::{self, Display},
+};
 
 use serde::Serialize;
 
-// TODO rewrite using Cow
+/// Subscription related error type
 #[derive(Debug, Serialize)]
-pub struct SubError {
+pub struct SubError<'a> {
     code: i64,
-    message: String,
+    message: Cow<'a, str>,
 }
 
+/// Error code that is returned to client, on request error
 pub enum SubErrorKind {
+    /// Subscription request couldn't be deserialized properly
     ParseError = -32700,
+    /// Subscription request contained parameter, which wasn't expected
     InvalidParams = -32602,
 }
 
-impl<T: serde::de::Error> From<T> for SubError {
+impl<'a, T: serde::de::Error> From<T> for SubError<'a> {
     fn from(e: T) -> Self {
         Self {
             code: SubErrorKind::ParseError as i64,
-            message: e.to_string(),
+            message: e.to_string().into(),
         }
     }
 }
 
-impl std::error::Error for SubError {}
+impl<'a> std::error::Error for SubError<'a> {}
 
-impl Display for SubError {
+impl<'a> Display for SubError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self)
     }
 }
 
-impl SubError {
-    pub fn new(message: String, kind: SubErrorKind) -> Self {
+impl<'a> SubError<'a> {
+    /// Error constructor
+    pub fn new(message: Cow<'a, str>, kind: SubErrorKind) -> Self {
         Self {
             code: kind as i64,
             message,

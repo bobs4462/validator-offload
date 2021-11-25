@@ -35,8 +35,9 @@ pub struct WsSession {
 }
 
 type Success = (SubResult, u64);
-type Failure = (SubError, Option<u64>);
+type Failure<'a> = (SubError<'a>, Option<u64>);
 impl WsSession {
+    /// Constructs new instance websocket session manager
     pub fn new(router: Addr<SubscriptionsRouter>, id: u64) -> Self {
         Self {
             hb: Instant::now(),
@@ -51,11 +52,12 @@ impl WsSession {
     /// checks. Will abort connection if client fails to
     /// respond during allowed time window
     fn hb(&self, ctx: &mut WebsocketContext<Self>) {
-        let callback = |actor: &mut Self, ctx: &mut WebsocketContext<Self>| {
+        let id = self.id;
+        let callback = move |actor: &mut Self, ctx: &mut WebsocketContext<Self>| {
             let now = Instant::now();
 
             if now.duration_since(actor.hb) > CLIENT_TIMEOUT {
-                println!("Client timed out, aborting connection");
+                println!("Client timed out, aborting connection: #{}", id);
                 ctx.stop();
                 return;
             }
@@ -64,6 +66,7 @@ impl WsSession {
         ctx.run_interval(HEARTBEAT_INTERVAL, callback);
     }
 
+    // Process incomming requests from clients over websocket connection
     fn process<T: AsRef<str>>(
         &mut self,
         msg: T,
@@ -197,7 +200,18 @@ impl Actor for WsSession {
 
 impl Handler<AccountUpdatedMessage> for WsSession {
     type Result = ();
-    fn handle(&mut self, msg: AccountUpdatedMessage, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, mut msg: AccountUpdatedMessage, ctx: &mut Self::Context) -> Self::Result {
+        match self.subscriptions.get_by_key(&msg.key) {
+            Some(id) => msg.sub = *id,
+            None => {
+                println!(
+                    "Subscription: {:?} coudn't be found in session: {}",
+                    &msg.key.key, self.id
+                );
+                return;
+            }
+        };
+
         let msg = AccountNotification::from(msg);
         let msg = serde_json::to_string(&msg).unwrap();
         ctx.text(msg);

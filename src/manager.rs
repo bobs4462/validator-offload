@@ -9,6 +9,9 @@ use crate::{
     SubKey,
 };
 
+/// Main struct to track which websocket sessions are interested
+/// in which kinds of updates. Keeps to separate mappings to track
+/// account related and slot related subscriptions respectively
 #[derive(Default)]
 pub struct SubscriptionManager {
     account_subscriptions: HashMap<SubKey, HashSet<Recipient<AccountUpdatedMessage>>>,
@@ -16,6 +19,11 @@ pub struct SubscriptionManager {
     id: usize,
 }
 
+/// Load balancer for subscriptions, evenly distributes work among
+/// several `SubscriptionManager`s based on hash value of unique
+/// subscription identifier: for account and program subscriptions
+/// this identifier is the `SubKey`, for slot subscriptions it is
+/// just the address of websocket session manager.
 pub struct SubscriptionsRouter {
     // subscription managers available in the pool
     managers: Vec<Addr<SubscriptionManager>>,
@@ -35,6 +43,11 @@ impl SubscriptionManager {
 }
 
 impl SubscriptionsRouter {
+    /// Create a new instance of subscriptions router, with
+    /// specified number of subscription managers, start all
+    /// managers in separate threads as Actors, collect their
+    /// addresses, and finally start self as an Actor in yet
+    /// another separate thread and return its own address
     pub fn new(pool_size: usize) -> Addr<Self> {
         let mut managers = Vec::with_capacity(pool_size);
         for id in 0..pool_size {
@@ -49,7 +62,8 @@ impl SubscriptionsRouter {
         Supervisor::start_in_arbiter(&arbiter, |_| router)
     }
 
-    /// Get the address of subscription manager, which should handle related message
+    /// Get the address of subscription manager, which should handle
+    /// related message, based on hash value of the unique message identifier
     #[inline]
     pub fn addr<T: Hash>(&self, item: T) -> &Addr<SubscriptionManager> {
         let mut hasher = DefaultHasher::new();

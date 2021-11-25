@@ -5,6 +5,8 @@ use crate::{
     Slot, SubID, SubscriptionKind, JSONRPC,
 };
 
+/// Notification sent over websocket connection,
+/// indicating that account has changed
 #[derive(Serialize)]
 pub struct AccountNotification {
     jsonrpc: &'static str,
@@ -12,6 +14,8 @@ pub struct AccountNotification {
     params: AccountNotificationParams,
 }
 
+/// Parameters of notification, contains account information
+/// and client issued subscription identifier
 #[derive(Serialize)]
 struct AccountNotificationParams {
     result: AccountNotificationResult,
@@ -29,13 +33,19 @@ struct AccountNotificationContext {
     slot: Slot,
 }
 
+/// Indicates the type of notification, can be either
+/// single account related or program accounts related
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum AccountNotificationValue {
+    /// Notification for program subscription, one
+    /// of the accounts of which has been updated
     Program(ProgramValue),
+    /// Notification for single account update
     Account(AccountValue),
 }
 
+/// Updated account state sent as payload of notification
 #[derive(Serialize)]
 pub struct AccountValue {
     data: [String; 2],
@@ -45,6 +55,8 @@ pub struct AccountValue {
     executable: bool,
 }
 
+/// Updated account state for program subscriptions, contains
+/// additional public key, to indicate which account has changed
 #[derive(Serialize)]
 pub struct ProgramValue {
     pubkey: String,
@@ -126,6 +138,7 @@ impl From<AccountInfo> for AccountValue {
     }
 }
 
+/// Notification indicating that slot has been updated
 #[derive(Serialize)]
 pub struct SlotNotification {
     jsonrpc: &'static str,
@@ -133,12 +146,16 @@ pub struct SlotNotification {
     params: SlotNotificationParams,
 }
 
+/// Parameters of notification, contains slot information
+/// and client issued subscription identifier
 #[derive(Serialize)]
 pub struct SlotNotificationParams {
     result: SlotNotificationResult,
     subscription: SubID,
 }
 
+/// Main payload of slot notification, contains slot
+/// number and its parent slot
 #[derive(Serialize)]
 pub struct SlotNotificationResult {
     slot: Slot,

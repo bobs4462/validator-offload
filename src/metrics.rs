@@ -4,6 +4,7 @@ use prometheus::{
     IntGaugeVec,
 };
 
+/// Collection of different application metrics
 pub struct Metrics {
     pub subscriptions_count: IntGaugeVec,
     pub connections_count: IntGauge,
@@ -13,9 +14,12 @@ pub struct Metrics {
     pub bytes_received: IntCounter,
     pub bytes_sent: IntCounter,
     pub connection_timeouts: IntCounter,
+    pub buffered_accounts: IntCounter,
+    pub buffered_slots: IntCounter,
 }
 
 lazy_static! {
+    /// Global accessable metrics container
     pub static ref METRICS: Metrics = {
         let subscriptions_count = register_int_gauge_vec!(
             "subscriptions_count",
@@ -62,6 +66,20 @@ lazy_static! {
         )
         .unwrap();
 
+        let buffered_accounts = register_int_counter!(
+            "buffered_accounts",
+            "Total number of accounts, whose slots haven't been finalized yet"
+        )
+        .unwrap();
+
+        let buffered_slots = register_int_counter!(
+            "buffered_slots",
+            "Total number of not finalized slots"
+        )
+        .unwrap();
+
+
+
         Metrics {
             subscriptions_count,
             connections_count,
@@ -71,6 +89,8 @@ lazy_static! {
             bytes_received,
             bytes_sent,
             connection_timeouts,
+            buffered_accounts,
+            buffered_slots,
         }
     };
 }

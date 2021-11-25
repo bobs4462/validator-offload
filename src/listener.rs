@@ -9,12 +9,14 @@ use crate::message::PubSubAccount;
 use crate::{manager::SubscriptionsRouter, message::SlotUpdatedMessage};
 use crate::{Slot, METRICS};
 
-/// Actor, which is responsible for listening to the nsq messages,
+/// Actor, which is responsible for listening to the NSQ messages,
 /// and forward them to subscription managers, after deserialization
 pub struct PubSubListner {
     /// Router, that distributes messages between `SubscriptionManager`s
     router: Addr<SubscriptionsRouter>,
+    /// List of web addresses, which can be used to locate NSQ lookup deamons in network
     nsqlookupd: HashSet<String>,
+    /// Largest slot number, observed from pubsub
     max_slot: Slot,
 }
 
@@ -23,7 +25,7 @@ impl Actor for PubSubListner {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         // every time this actor is restarted, resubscribe to
-        // account and slot topics
+        // account and slot topics all over again
         let pubsub_account_state =
             PubSubState::new("accounts", "accounts", self.nsqlookupd.clone());
         let pubsub_slot_state = PubSubState::new("slots", "slots", self.nsqlookupd.clone());
@@ -33,10 +35,12 @@ impl Actor for PubSubListner {
         // re-register streams
         ctx.add_stream(pubsub_accounts_stream);
         ctx.add_stream(pubsub_slot_stream);
+        println!("Subscribed to NSQ pubsub topics");
     }
 }
 
 impl PubSubListner {
+    /// Create a new listener
     pub fn new(router: Addr<SubscriptionsRouter>, nsqlookupd: HashSet<String>) -> Addr<Self> {
         let listener = Self {
             router,
@@ -115,6 +119,7 @@ pub async fn pubsub_slots_listen(
     }
 }
 
+/// Wrapping type to hold consumer of NSQ messages
 pub struct PubSubState(NSQConsumer);
 
 impl PubSubState {

@@ -64,10 +64,10 @@ pub struct SubResponse {
 }
 
 #[derive(Serialize)]
-pub struct SubResponseError {
+pub struct SubResponseError<'a> {
     jsonrpc: &'static str,
     id: Option<u64>,
-    error: SubError,
+    error: SubError<'a>,
 }
 
 #[derive(Serialize)]
@@ -108,8 +108,8 @@ impl SubResponse {
     }
 }
 
-impl SubResponseError {
-    pub fn new(id: Option<u64>, error: SubError) -> Self {
+impl<'a> SubResponseError<'a> {
+    pub fn new(id: Option<u64>, error: SubError<'a>) -> Self {
         Self {
             jsonrpc: JSONRPC,
             id,
