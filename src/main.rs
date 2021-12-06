@@ -1,7 +1,9 @@
 use structopt::StructOpt;
+use ws_server::buffer::Buffer;
 use ws_server::cli::CliOptions;
 use ws_server::listener::PubSubListner;
 use ws_server::manager::SubscriptionsRouter;
+use ws_server::message::SetBufferManager;
 use ws_server::server::{Server, ServerState};
 
 #[actix::main]
@@ -15,6 +17,8 @@ async fn main() -> std::io::Result<()> {
 
     let state = ServerState::new(router.clone());
     let server = Server::new(state, opts.bind_addr, workers);
+    let buffer = Buffer::new(router.clone());
+    router.do_send(SetBufferManager(buffer));
 
     PubSubListner::new(router, opts.nsqlookup.into_iter().collect());
 

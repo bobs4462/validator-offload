@@ -1,8 +1,12 @@
-use actix::{Message, Recipient};
+use actix::{Addr, Message, Recipient};
 use bytes::Bytes;
 use serde::Deserialize;
 
-use crate::{Commitment, Pubkey, Slot, SubID, SubKey, SubscriptionKind};
+use crate::{
+    buffer::Buffer,
+    slotree::{RawSlot, SlotStatus},
+    Commitment, Pubkey, Slot, SubID, SubKey, SubscriptionKind,
+};
 
 /// Message that contains information about which account was
 /// updated, and what subscriptions it can be published to
@@ -27,7 +31,7 @@ pub struct SlotUpdatedMessage {
     /// Slot number which is considered to parent of current slot
     pub parent: Slot,
     /// Level of finalization of given slot
-    pub commitment: Commitment,
+    pub status: Commitment,
 }
 
 /// Representation of account state
@@ -90,7 +94,7 @@ pub struct PubSubAccount {
     pub slot_status: u8,
 }
 
-/// Wrapper type, to conveniently handling account updates which can
+/// Wrapper type, to conveniently handle account updates which can
 /// be related to both single account or program accounts subscription
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -100,6 +104,20 @@ pub struct PubSubAccountWithSubKind {
     /// Which kind of subscription this data should be checked against
     pub kind: SubscriptionKind,
 }
+
+/// Message that is sent to Buffer manager, which starts
+/// keeping track of account's slot status updates
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct TrackAccount(pub PubSubAccount);
+
+/// Message used to set buffer manager's address in subscription
+/// manager, as it's not possible to do it during initialization,
+/// due to circular dependency: subscription router ->
+/// subscription manager -> buffer manager -> subscription router
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct SetBufferManager(pub Addr<Buffer>);
 
 impl PubSubAccountWithSubKind {
     /// Helper method to crate new instance of `PubSubAccountWithSubKind` message
@@ -128,5 +146,22 @@ impl From<PubSubAccount> for AccountInfo {
             rent_epoch: acc.rent_epoch,
             slot: acc.slot,
         }
+    }
+}
+
+impl RawSlot for SlotUpdatedMessage {
+    #[inline]
+    fn slot(&self) -> Slot {
+        self.slot
+    }
+
+    #[inline]
+    fn parent(&self) -> Slot {
+        self.parent
+    }
+
+    #[inline]
+    fn status(&self) -> SlotStatus {
+        self.status.into()
     }
 }

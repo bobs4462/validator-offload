@@ -27,6 +27,8 @@ pub mod server;
 /// Handling of websocket session and keeping track of subscriptions
 /// for this particular session
 pub mod session;
+/// Data structure to keep track of slot updates
+mod slotree;
 /// Subscription requests sent from client to server via established
 /// websocket connection
 pub mod subscription;
@@ -93,6 +95,13 @@ impl From<u8> for Commitment {
             3 => Commitment::Finalized,
             _ => Commitment::Processed,
         }
+    }
+}
+
+impl Commitment {
+    /// Whether the given commitment has been confirmed by supermajority
+    pub fn confirmed(&self) -> bool {
+        matches!(self, Self::Confirmed)
     }
 }
 

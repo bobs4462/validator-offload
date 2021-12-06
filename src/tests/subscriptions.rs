@@ -2,6 +2,7 @@
 use std::hash::Hash;
 
 use crate::{
+    buffer::Buffer,
     manager::{SubscriptionManager, SubscriptionsRouter},
     message::{AccountUpdatedMessage, SlotUpdatedMessage, SubscribeMessage, SubscriptionInfo},
     subscription::*,

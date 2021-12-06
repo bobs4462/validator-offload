@@ -2,7 +2,8 @@ use actix::{Actor, Addr, Arbiter, Context, Handler, Recipient, Supervised, Super
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
-use crate::message::PubSubAccountWithSubKind;
+use crate::buffer::Buffer;
+use crate::message::{PubSubAccountWithSubKind, SetBufferManager};
 use crate::SubscriptionKind;
 use crate::{
     message::{AccountUpdatedMessage, PubSubAccount, SlotUpdatedMessage, SubscribeMessage},
@@ -15,6 +16,7 @@ use crate::{
 pub struct SubscriptionManager {
     account_subscriptions: HashMap<SubKey, HashSet<Recipient<AccountUpdatedMessage>>>,
     slot_subscriptions: HashSet<Recipient<SlotUpdatedMessage>>,
+    buffer_manager: Option<Addr<Buffer>>,
     id: usize,
 }
 
@@ -26,6 +28,8 @@ pub struct SubscriptionManager {
 pub struct SubscriptionsRouter {
     // subscription managers available in the pool
     managers: Vec<Addr<SubscriptionManager>>,
+    // buffer manager, to track non-finalized accounts
+    buffer_manager: Option<Addr<Buffer>>,
 }
 
 impl SubscriptionManager {
@@ -36,6 +40,7 @@ impl SubscriptionManager {
             id,
             account_subscriptions,
             slot_subscriptions,
+            buffer_manager: None,
         }
     }
 }
@@ -67,7 +72,10 @@ impl SubscriptionsRouter {
             let addr = Supervisor::start_in_arbiter(&arbiter, |_| sm);
             managers.push(addr);
         }
-        let router = Self { managers };
+        let router = Self {
+            managers,
+            buffer_manager: None,
+        };
         let arbiter = Arbiter::new().handle();
         Supervisor::start_in_arbiter(&arbiter, |_| router)
     }
@@ -140,16 +148,28 @@ impl Handler<PubSubAccountWithSubKind> for SubscriptionManager {
     fn handle(&mut self, acc: PubSubAccountWithSubKind, _: &mut Self::Context) -> Self::Result {
         let key = SubKey::from(&acc);
 
-        let update = AccountUpdatedMessage::from(acc);
-
         if let Some(recipients) = self.account_subscriptions.get_mut(&key) {
+            let pubsub_account = acc.account.clone();
+            if pubsub_account.slot_status == 1 {
+                // Account has been processed, start tracking it for slot
+                // status update, ignore other commitment levels
+                let bm = self
+                    .buffer_manager
+                    .as_ref()
+                    .expect("No buffer manager is set up for submanager");
+                bm.do_send(pubsub_account);
+            }
+            let update = AccountUpdatedMessage::from(acc);
             let mut failed = Vec::new();
+            // Broadcast the account update to all websocket session managers,
+            // which have registered themselves for it
             for r in recipients.iter() {
                 if let Err(e) = r.do_send(update.clone()) {
                     println!("failed to send account data to ws session: {}", e);
                     failed.push(r.clone());
                 }
             }
+            // Remove inactive subscriptions, for which there's no active websocket session
             for f in failed {
                 recipients.remove(&f);
             }
@@ -217,5 +237,35 @@ impl Handler<SlotUpdatedMessage> for SubscriptionsRouter {
         for addr in &self.managers {
             addr.do_send(msg.clone());
         }
+        // also forward the slot to buffer manager, to send notifications
+        // for accounts, which are related to given slot
+        let bm = self
+            .buffer_manager
+            .as_ref()
+            .expect("No buffer manager is set up for subrouter");
+
+        bm.do_send(msg);
+    }
+}
+
+impl Handler<SetBufferManager> for SubscriptionsRouter {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetBufferManager, _: &mut Self::Context) -> Self::Result {
+        // forward message to all subscription managers
+        for m in &self.managers {
+            m.do_send(msg.clone());
+        }
+
+        self.buffer_manager.replace(msg.0);
+    }
+}
+
+impl Handler<SetBufferManager> for SubscriptionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetBufferManager, _: &mut Self::Context) -> Self::Result {
+        // set buffer manager's address
+        self.buffer_manager = Some(msg.0);
     }
 }
