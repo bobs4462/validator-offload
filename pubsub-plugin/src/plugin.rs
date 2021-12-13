@@ -119,6 +119,7 @@ impl AccountsDbPlugin for NSQPubSubPlugin {
     }
 
     fn on_load(&mut self, config_file: &str) -> AccDBResult<()> {
+        log::warn!("{}, LOADED", self.name());
         let config = NSQPluginConfig::try_from(config_file)?;
         let accounts = NSQTopic::new(&config.account_topic).unwrap();
         let slots = NSQTopic::new(&config.slot_topic).unwrap();
@@ -133,6 +134,7 @@ impl AccountsDbPlugin for NSQPubSubPlugin {
         slot: u64,
         is_startup: bool,
     ) -> AccDBResult<()> {
+        log::warn!("ACCOUNT UPDATE FOR {}", self.name());
         // for now we are not interested in accounts, which were restored from last snapshot
         if is_startup {
             return Ok(());
@@ -152,6 +154,7 @@ impl AccountsDbPlugin for NSQPubSubPlugin {
         parent: Option<u64>,
         status: AccDBSlotStatus,
     ) -> AccDBResult<()> {
+        log::warn!("SLOT UPDATE FOR {}", self.name());
         let message = Message::from_slot(
             slot,
             parent.unwrap_or_default(),
